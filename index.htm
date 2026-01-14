@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WorkerHub Live - ระบบจัดการแรงงานต่างด้าว</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&family=Sarabun:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        body { font-family: 'Inter', 'Sarabun', sans-serif; }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect, useCallback } = React;
+        
+        // Lucide Icon Component for React
+        const Icon = ({ name, size = 16, className = "" }) => {
+            return <i data-lucide={name} style={{ width: size, height: size }} className={className}></i>;
+        };
+
+        const App = () => {
+            const [activeTab, setActiveTab] = useState("Dashboard");
+            const [activeBranch, setActiveBranch] = useState("บางใหญ่ SUKI");
+            const [searchTerm, setSearchTerm] = useState("");
+            const [filterStatus, setFilterStatus] = useState("ทั้งหมด");
+            const [data, setData] = useState({
+                "บางใหญ่ SUKI": [],
+                "บางใหญ่ BBQ": [],
+                "มหาชัย": []
+            });
+            const [sheetUrl, setSheetUrl] = useState("");
+            const [showSettings, setShowSettings] = useState(false);
+            const [lastUpdated, setLastUpdated] = useState("");
+            const [loading, setLoading] = useState(false);
+            const [isLoaded, setIsLoaded] = useState(false);
+            const [currentPage, setCurrentPage] = useState(1);
+            const itemsPerPage = 50;
+
+            useEffect(() => {
+                lucide.createIcons();
+                const savedData = localStorage.getItem('worker_hub_data');
+                const savedUrl = localStorage.getItem('worker_hub_sheet_url');
+                const savedTime = localStorage.getItem('worker_hub_last_updated');
+                if (savedUrl) setSheetUrl(savedUrl);
+                if (savedTime) setLastUpdated(savedTime);
+                if (savedData) {
+                    setData(JSON.parse(savedData));
+                    setIsLoaded(true);
+                }
+            }, []);
+
+            useEffect(() => { lucide.createIcons(); }, [activeTab, activeBranch, isLoaded, showSettings, loading]);
+
+            const fetchDataFromSheet = async (urlToFetch = sheetUrl) => {
+                if (!urlToFetch) return;
+                setLoading(true);
+                try {
+                    const response = await fetch(urlToFetch);
+                    if (!response.ok) throw new Error("Connection failed");
+                    const text = await response.text();
+                    processCSV(text);
+                    const now = new Date().toLocaleString('th-TH');
+                    setLastUpdated(now);
+                    localStorage.setItem('worker_hub_sheet_url', urlToFetch);
+                    localStorage.setItem('worker_hub_last_updated', now);
+                    setShowSettings(false);
+                } catch (error) {
+                    alert("Error: " + error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const processCSV = (csvText) => {
+                const lines = csvText.split(/\r?\n/);
+                const branchData = { "บางใหญ่ SUKI": [], "บางใหญ่ BBQ": [], "มหาชัย": [] };
+                for (let i = 2; i < lines.length; i++) {
+                    if (!lines[i]) continue;
+                    const cols = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || lines[i].split(',');
+                    const clean = (val) => val ? val.trim().replace(/^"|"$/g, '') : "";
+                    if (clean(cols[1])) {
+                        branchData["บางใหญ่ SUKI"].push({
+                            id: clean(cols[1]), name: clean(cols[2]), sso: clean(cols[3]),
+                            type: clean(cols[5]), res: clean(cols[6]), pass: clean(cols[8]),
+                            visa: clean(cols[9]), work: clean(cols[10]), status: clean(cols[11]), pink: clean(cols[12])
+                        });
+                    }
+                    if (clean(cols[16])) {
+                        branchData["บางใหญ่ BBQ"].push({
+                            id: clean(cols[16]), name: clean(cols[17]), sso: clean(cols[18]),
+                            type: clean(cols[20]), res: clean(cols[21]), pass: clean(cols[22]),
+                            visa: clean(cols[23]), work: clean(cols[24]), status: clean(cols[25]), pink: clean(cols[26])
+                        });
+                    }
+                    if (clean(cols[29])) {
+                        branchData["มหาชัย"].push({
+                            id: clean(cols[29]), name: clean(cols[30]), sso: clean(cols[32]),
+                            type: clean(cols[33]), res: clean(cols[34]), pass: clean(cols[35]),
+                            visa: clean(cols[36]), work: "-", status: clean(cols[37]), pink: clean(cols[40])
+                        });
+                    }
+                }
+                setData(branchData);
+                setIsLoaded(true);
+                localStorage.setItem('worker_hub_data', JSON.stringify(branchData));
+            };
+
+            const stats = useMemo(() => {
+                let totals = { total: 0, alert: 0, done: 0, mou: 0 };
+                Object.values(data).flat().forEach(w => {
+                    totals.total++;
+                    if (w.status?.includes("เตรียมต่อ") || w.status?.includes("กลุ่มลงทะเบียน")) totals.alert++;
+                    if (w.status?.includes("เรียบร้อย") || w.status?.includes("ลงทะเบียนใหม่แล้ว")) totals.done++;
+                    if (w.type === "MOU") totals.mou++;
+                });
+                return totals;
+            }, [data]);
+
+            const filteredList = useMemo(() => {
+                if (activeTab === "Dashboard") return [];
+                const base = data[activeBranch] || [];
+                return base.filter(w => {
+                    const matchSearch = (w.name + w.id).toLowerCase().includes(searchTerm.toLowerCase());
+                    const matchStatus = filterStatus === "ทั้งหมด" || w.status === filterStatus;
+                    return matchSearch && matchStatus;
+                });
+            }, [data, activeBranch, activeTab, searchTerm, filterStatus]);
+
+            const paginatedData = filteredList.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+            const totalPages = Math.ceil(filteredList.length / itemsPerPage);
+
+            return (
+                <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row text-slate-900">
+                    {/* Sidebar */}
+                    <aside className="w-full md:w-64 bg-slate-900 text-white flex flex-col shrink-0 md:h-screen md:sticky md:top-0 z-20">
+                        <div className="p-6 border-b border-white/5 flex items-center gap-3">
+                            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center"><Icon name="zap" className="text-yellow-400 fill-yellow-400" /></div>
+                            <span className="text-xl font-black tracking-tight">WorkerHub</span>
+                        </div>
+                        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+                            <button onClick={() => setActiveTab("Dashboard")} className={`w-full text-left px-4 py-3 rounded-xl flex items-center gap-3 transition-colors ${activeTab === "Dashboard" ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-white/5'}`}>
+                                <Icon name="file-text" /> <span className="text-sm font-bold">Dashboard</span>
+                            </button>
+                            <div className="py-4 px-4 text-[10px] font-black text-slate-500 uppercase tracking-widest">สาขา</div>
+                            {Object.keys(data).map(branch => (
+                                <button key={branch} onClick={() => { setActiveTab("Branch"); setActiveBranch(branch); setCurrentPage(1); }} className={`w-full text-left px-4 py-3 rounded-xl flex items-center justify-between transition-all ${activeTab === "Branch" && activeBranch === branch ? 'bg-slate-800 text-blue-400 border-l-4 border-blue-500' : 'text-slate-400 hover:bg-white/5'}`}>
+                                    <div className="flex items-center gap-3"><Icon name="map-pin" /> <span className="text-sm font-bold">{branch}</span></div>
+                                    <span className="text-[10px] opacity-50 bg-slate-700 px-2 py-0.5 rounded-full">{data[branch].length}</span>
+                                </button>
+                            ))}
+                        </nav>
+                        <div className="p-4 border-t border-white/5 space-y-2">
+                            {sheetUrl && (
+                                <button onClick={() => fetchDataFromSheet()} disabled={loading} className="w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 py-3 rounded-xl text-sm font-bold shadow-lg transition-all active:scale-95 disabled:opacity-50">
+                                    <Icon name="refresh-cw" className={loading ? "animate-spin" : ""} /> {loading ? "Loading..." : "Sync ข้อมูล"}
+                                </button>
+                            )}
+                            <button onClick={() => setShowSettings(true)} className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 py-3 rounded-xl text-sm font-bold transition-all">
+                                <Icon name="settings" /> ตั้งค่าการเชื่อมต่อ
+                            </button>
+                        </div>
+                    </aside>
+
+                    {/* Main */}
+                    <main className="flex-1 flex flex-col h-screen overflow-hidden">
+                        <header className="h-20 bg-white border-b px-8 flex items-center justify-between shrink-0">
+                            <div>
+                                <h2 className="text-xl font-bold">{activeTab === "Dashboard" ? "ภาพรวม" : activeBranch}</h2>
+                                {lastUpdated && <p className="text-[10px] text-slate-400 mt-1">อัปเดตล่าสุด: {lastUpdated}</p>}
+                            </div>
+                            <div className="relative w-80 group">
+                                <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ค้นหาชื่อ รหัส..." className="w-full pl-4 pr-4 py-2.5 bg-slate-100 rounded-xl text-sm border-none focus:ring-2 focus:ring-blue-500 outline-none" />
+                            </div>
+                        </header>
+
+                        <section className="flex-1 overflow-auto p-8 relative">
+                            {!isLoaded ? (
+                                <div className="h-full flex flex-col items-center justify-center text-center py-20">
+                                    <Icon name="link" size={48} className="text-blue-500 mb-4" />
+                                    <h3 className="text-2xl font-black mb-2">ยังไม่ได้เชื่อมต่อข้อมูล</h3>
+                                    <button onClick={() => setShowSettings(true)} className="mt-4 px-6 py-2 bg-blue-600 text-white font-bold rounded-xl shadow-lg shadow-blue-200">ตั้งค่าทันที</button>
+                                </div>
+                            ) : activeTab === "Dashboard" ? (
+                                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                                    {[
+                                        { label: "รวมทั้งหมด", val: stats.total, color: "blue", icon: "users" },
+                                        { label: "ต้องต่อใบอนุญาต", val: stats.alert, color: "amber", icon: "alert-triangle" },
+                                        { label: "ต่อเสร็จแล้ว", val: stats.done, color: "green", icon: "check-circle" },
+                                        { label: "MOU", val: stats.mou, color: "purple", icon: "zap" },
+                                    ].map((c, i) => (
+                                        <div key={i} className="bg-white p-6 rounded-[32px] shadow-sm border border-slate-200">
+                                            <div className={`w-10 h-10 rounded-xl bg-${c.color}-50 text-${c.color}-600 flex items-center justify-center mb-4`}><Icon name={c.icon} /></div>
+                                            <div className="text-[10px] font-black text-slate-400 uppercase">{c.label}</div>
+                                            <div className="text-3xl font-black mt-1">{c.val.toLocaleString()}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="flex flex-col h-full bg-white rounded-[32px] border border-slate-200 overflow-hidden shadow-sm">
+                                    <div className="p-4 bg-slate-50 border-b flex gap-2 overflow-x-auto">
+                                        {["ทั้งหมด", "เตรียมต่อใบอนุญาต", "ลงทะเบียนใหม่แล้ว"].map(s => (
+                                            <button key={s} onClick={() => setFilterStatus(s)} className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap ${filterStatus === s ? 'bg-blue-600 text-white shadow-md' : 'bg-white border text-slate-500'}`}>{s}</button>
+                                        ))}
+                                    </div>
+                                    <div className="flex-1 overflow-auto">
+                                        <table className="w-full text-left text-sm">
+                                            <thead className="bg-white text-slate-400 uppercase text-[10px] font-black tracking-widest sticky top-0 border-b">
+                                                <tr>
+                                                    <th className="px-6 py-4">รหัส/พนักงาน</th>
+                                                    <th className="px-6 py-4">ประเภท</th>
+                                                    <th className="px-6 py-4">วันหมดอายุ</th>
+                                                    <th className="px-6 py-4">สถานะ</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                                {paginatedData.map((w, idx) => (
+                                                    <tr key={idx} className="hover:bg-blue-50/50 transition-colors">
+                                                        <td className="px-6 py-4">
+                                                            <div className="font-bold text-slate-800">{w.name}</div>
+                                                            <div className="text-[10px] text-slate-400 font-mono">ID: {w.id}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="font-bold text-slate-600">{w.type}</div>
+                                                            <div className="text-[9px] text-slate-400 uppercase">{w.res}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="text-xs font-bold">P: {w.pass}</div>
+                                                            <div className={`text-[10px] font-bold ${w.visa?.includes("2026") ? "text-red-500" : "text-slate-400"}`}>V: {w.visa}</div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className={`px-2 py-1 rounded-md text-[10px] font-black border ${w.status?.includes("ลงทะเบียนใหม่") ? "bg-green-50 text-green-600 border-green-100" : "bg-slate-50 text-slate-400 border-slate-100"}`}>
+                                                                {w.status || "-"}
+                                                            </span>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    <div className="p-4 border-t bg-slate-50 flex items-center justify-between text-xs font-bold">
+                                        <div>หน้า {currentPage} / {totalPages || 1}</div>
+                                        <div className="flex gap-2">
+                                            <button disabled={currentPage === 1} onClick={() => setCurrentPage(p => p - 1)} className="p-2 bg-white border rounded-lg disabled:opacity-30">Prev</button>
+                                            <button disabled={currentPage >= totalPages} onClick={() => setCurrentPage(p => p + 1)} className="p-2 bg-white border rounded-lg disabled:opacity-30">Next</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </section>
+                    </main>
+
+                    {/* Settings Modal */}
+                    {showSettings && (
+                        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+                            <div className="bg-white w-full max-w-lg rounded-[32px] shadow-2xl overflow-hidden p-8">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h3 className="text-xl font-black">ตั้งค่า Google Sheets</h3>
+                                    <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-slate-600">ปิด</button>
+                                </div>
+                                <input type="text" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="วางลิงก์ CSV จาก Google Sheets ที่นี่..." className="w-full px-4 py-3 bg-slate-100 rounded-xl mb-4 text-sm border-none focus:ring-2 focus:ring-blue-500 outline-none" />
+                                <button onClick={() => fetchDataFromSheet()} className="w-full bg-blue-600 text-white py-4 rounded-xl font-bold text-sm shadow-xl shadow-blue-200 active:scale-95 transition-all">เชื่อมต่อและ Sync ข้อมูล</button>
+                                <button onClick={() => {localStorage.clear(); window.location.reload();}} className="w-full mt-4 text-red-500 font-bold text-xs">ล้างข้อมูลทั้งหมด</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
